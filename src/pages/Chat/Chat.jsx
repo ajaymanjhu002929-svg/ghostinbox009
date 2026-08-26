@@ -1082,47 +1082,72 @@ const Chat = () => {
   // SEND TYPING STATUS
   // =======================================================
 
-  const handleTyping = () => {
+  const stopTyping = () => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+
     if (
       !socketRef.current?.connected ||
-      !selectedReceiverId
+      !selectedReceiverId ||
+      !selectedConnectionId
     ) {
+      return;
+    }
+
+    socketRef.current.emit(
+      "typing-stop",
+      {
+        receiver: selectedReceiverId,
+        receiverId: selectedReceiverId,
+        connectionId: selectedConnectionId,
+      }
+    );
+  };
+
+  const handleTyping = (value) => {
+    if (
+      !socketRef.current?.connected ||
+      !selectedReceiverId ||
+      !selectedConnectionId
+    ) {
+      return;
+    }
+
+    // Empty input means the user stopped typing immediately.
+    if (!value?.trim()) {
+      stopTyping();
       return;
     }
 
     socketRef.current.emit(
       "typing-start",
       {
-        receiver:
-          selectedReceiverId,
-
-        connectionId:
-          selectedConnectionId,
+        receiver: selectedReceiverId,
+        receiverId: selectedReceiverId,
+        connectionId: selectedConnectionId,
       }
     );
 
-    if (
-      typingTimeoutRef.current
-    ) {
-      clearTimeout(
-        typingTimeoutRef.current
-      );
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
     }
 
-    typingTimeoutRef.current =
-      setTimeout(() => {
-        socketRef.current?.emit(
-          "typing-stop",
-          {
-            receiver:
-              selectedReceiverId,
-
-            connectionId:
-              selectedConnectionId,
-          }
-        );
-      }, 1000);
+    typingTimeoutRef.current = setTimeout(() => {
+      stopTyping();
+    }, 1200);
   };
+
+  // Always stop typing when the selected chat changes or Chat unmounts.
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    };
+  }, [selectedReceiverId, selectedConnectionId]);
 
   // =======================================================
   // SEND MESSAGE
@@ -1156,24 +1181,7 @@ const Chat = () => {
     // STOP TYPING
     // -----------------------------------------------
 
-    if (
-      typingTimeoutRef.current
-    ) {
-      clearTimeout(
-        typingTimeoutRef.current
-      );
-    }
-
-    socketRef.current?.emit(
-      "typing-stop",
-      {
-        receiver:
-          selectedReceiverId,
-
-        connectionId:
-          selectedConnectionId,
-      }
-    );
+    stopTyping();
 
     // =====================================================
     // SOCKET SEND
@@ -2212,11 +2220,12 @@ const Chat = () => {
           <textarea
             value={message}
             onChange={(event) => {
-              setMessage(
-                event.target.value
-              );
+              const value =
+                event.target.value;
 
-              handleTyping();
+              setMessage(value);
+
+              handleTyping(value);
             }}
             onKeyDown={
               handleKeyDown

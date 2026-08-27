@@ -1413,7 +1413,7 @@ const Chat = () => {
       };
 
       if (socketRef.current?.connected) {
-        await new Promise((resolve, reject) => {
+        const result = await new Promise((resolve, reject) => {
           let settled = false;
 
           const finish = (fn, value) => {
@@ -1422,11 +1422,11 @@ const Chat = () => {
             fn(value);
           };
 
-          socketRef.current.emit("send-message", payload, (result) => {
-            if (result?.success) {
-              finish(resolve, result);
+          socketRef.current.emit("send-message", payload, (socketResult) => {
+            if (socketResult?.success) {
+              finish(resolve, socketResult);
             } else {
-              finish(reject, new Error(result?.message || "Failed to send message"));
+              finish(reject, new Error(socketResult?.message || "Failed to send message"));
             }
           });
 
@@ -1435,7 +1435,24 @@ const Chat = () => {
           }, 10000);
         });
 
-        // message-sent listener clears the composer and adds the message.
+        // Keep the sender UI reliable even if the separate message-sent
+        // event is missed during a reconnect. The event listener below also
+        // handles it, but its duplicate check prevents the message appearing twice.
+        const sentMessage = normalizeMessage(result?.message);
+        if (sentMessage) {
+          setMessages((previous) => {
+            const exists = previous.some(
+              (item) => getId(item._id) === getId(sentMessage._id)
+            );
+            return exists ? previous : [...previous, sentMessage];
+          });
+        }
+
+        setMessage("");
+        setReplyingTo(null);
+        setIsOtherUserTyping(false);
+        setSending(false);
+        scrollToBottom();
         return;
       }
 

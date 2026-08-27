@@ -7,6 +7,7 @@ import { Routes, Route } from "react-router-dom";
 
 import Splash from "../pages/Splash/Splash";
 import Auth from "../pages/Auth/Auth";
+import AuthCallback from "../pages/AuthCallback/AuthCallback";
 import CreateProfile from "../pages/CreateProfile/CreateProfile";
 import InterestCategory from "../pages/InterestCategory/InterestCategory";
 
@@ -62,6 +63,16 @@ const AppRoutes = () => {
       <Route
         path="/auth"
         element={<Auth />}
+      />
+
+
+      {/* =========================
+          GOOGLE AUTH CALLBACK
+      ========================= */}
+
+      <Route
+        path="/auth-callback"
+        element={<AuthCallback />}
       />
 
 
@@ -185,10 +196,15 @@ const AppRoutes = () => {
       />
 
 
-    <Route
-  path="/end-connection"
-  element={<EndConnection />}
-/>
+      {/* =========================
+          END CONNECTION
+      ========================= */}
+
+      <Route
+        path="/end-connection"
+        element={<EndConnection />}
+      />
+
     </Routes>
   );
 };

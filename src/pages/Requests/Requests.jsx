@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 import React, {
   useEffect,
   useState,
@@ -33,7 +34,7 @@ const Requests = () => {
     try {
       setLoading(true);
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API}/requests`,
         {
           method: "GET",
@@ -128,7 +129,7 @@ const Requests = () => {
         request._id
       );
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API}/requests/${request._id}/accept`,
         {
           method: "PATCH",
@@ -221,7 +222,7 @@ const Requests = () => {
         request._id
       );
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API}/requests/${request._id}/reject`,
         {
           method: "PATCH",

@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -54,7 +55,7 @@ const Discover = () => {
 
       console.log("DISCOVER URL:", url);
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: "GET",
         credentials: "include",
         headers: {

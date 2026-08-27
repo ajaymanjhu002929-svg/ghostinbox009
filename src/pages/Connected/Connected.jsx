@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -64,7 +65,7 @@ const Connected = () => {
       try {
         setLoading(true);
 
-        const response = await fetch(
+        const response = await authFetch(
           `${API}/connections`,
           {
             method: "GET",

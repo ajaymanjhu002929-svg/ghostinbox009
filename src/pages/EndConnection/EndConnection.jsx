@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 import React, {
   useState,
 } from "react";
@@ -116,7 +117,7 @@ const EndConnection = () => {
         if (saveEvidence) {
 
           const evidenceResponse =
-            await fetch(
+            await authFetch(
               `${API_URL}/evidence`,
               {
                 method:
@@ -173,7 +174,7 @@ const EndConnection = () => {
         // ======================================================
 
         const response =
-          await fetch(
+          await authFetch(
             `${API_URL}/connections/${connectionId}`,
             {
               method:

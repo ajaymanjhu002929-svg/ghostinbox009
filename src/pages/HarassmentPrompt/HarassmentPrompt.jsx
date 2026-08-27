@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -37,7 +38,7 @@ const HarassmentPrompt = () => {
     try {
       setSaving(true);
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_URL}/messages/connection/${connectionId}/save-evidence`,
         {
           method: "PATCH",

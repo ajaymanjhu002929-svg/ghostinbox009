@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../../context/SocketContext";
@@ -55,7 +56,7 @@ const Profile = () => {
           ? `${API_URL}/profile/me`
           : `${API_URL}/profile/${id}`;
 
-        const response = await fetch(url, {
+        const response = await authFetch(url, {
           method: "GET",
           credentials: "include",
           headers: {
@@ -101,7 +102,7 @@ const Profile = () => {
       setLoggingOut(true);
       setShowMenu(false);
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_URL}/auth/logout`,
         {
           method: "POST",
@@ -177,7 +178,7 @@ const Profile = () => {
        * DELETE /api/profile
        */
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_URL}/auth/delete-account`,
         {
           method: "DELETE",
@@ -237,7 +238,7 @@ const Profile = () => {
         return;
       }
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_URL}/requests`,
         {
           method: "POST",

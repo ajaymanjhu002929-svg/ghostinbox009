@@ -1,3 +1,4 @@
+import { authFetch } from "../services/api";
 const API_URL = "https://ghostinbox09.onrender.com/api";
 
 // ==========================================
@@ -6,7 +7,7 @@ const API_URL = "https://ghostinbox09.onrender.com/api";
 
 export const getProfile = async () => {
   try {
-    const response = await fetch(
+    const response = await authFetch(
       `${API_URL}/profile/me`,
       {
         method: "GET",

@@ -1,3 +1,4 @@
+import { authFetch } from "../../services/api";
 import React, {
   useEffect,
   useRef,
@@ -352,7 +353,7 @@ const Chat = () => {
           );
 
           const response =
-            await fetch(
+            await authFetch(
               `${API_URL}/auth/me`,
               {
                 method: "GET",
@@ -475,7 +476,7 @@ const Chat = () => {
         setError("");
 
         const response =
-          await fetch(
+          await authFetch(
             `${API_URL}/connections`,
             {
               method: "GET",
@@ -658,7 +659,7 @@ const Chat = () => {
           setError("");
 
           const response =
-            await fetch(
+            await authFetch(
               `${API_URL}/messages/${selectedConnectionId}`,
               {
                 method: "GET",
@@ -702,7 +703,7 @@ const Chat = () => {
           }
 
           try {
-            await fetch(
+            await authFetch(
               `${API_URL}/messages/connection/${selectedConnectionId}/read-all`,
               {
                 method: "PATCH",
@@ -1312,7 +1313,7 @@ const Chat = () => {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/messages`,
           {
             method: "POST",
@@ -1483,7 +1484,7 @@ const Chat = () => {
           else { setMessage(""); setEditingMessageId(null); }
         });
       } else {
-        const response = await fetch(`${API_URL}/messages/${editingMessageId}`, { method:"PATCH", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
+        const response = await authFetch(`${API_URL}/messages/${editingMessageId}`, { method:"PATCH", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.message || "Unable to edit message");
         const edited = normalizeMessage(data?.data || data?.message);
@@ -1501,7 +1502,7 @@ const Chat = () => {
           if (!result?.success) alert(result?.message || "Unable to delete message");
         });
       } else {
-        const response = await fetch(`${API_URL}/messages/${getId(msg._id)}`, { method:"DELETE", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mode}) });
+        const response = await authFetch(`${API_URL}/messages/${getId(msg._id)}`, { method:"DELETE", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mode}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.message || "Unable to delete message");
         if (mode === "me") setMessages(previous => previous.filter(item => getId(item._id) !== getId(msg._id)));
@@ -1717,7 +1718,7 @@ const Chat = () => {
         );
 
         const response =
-          await fetch(
+          await authFetch(
             `${API_URL}/connections/${selectedConnectionId}`,
             {
               method: "DELETE",

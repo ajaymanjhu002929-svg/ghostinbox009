@@ -1,4 +1,3 @@
-import { authFetch } from "../../services/api";
 import React, {
   useEffect,
   useRef,
@@ -10,13 +9,10 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { io } from "socket.io-client";
+import { useSocket } from "../../context/SocketContext";
 
 const API_URL =
   "https://ghostinbox09.onrender.com/api";
-
-const SOCKET_URL =
-  "https://ghostinbox09.onrender.com";
 
 // =========================================================
 // CHAT COMPONENT
@@ -25,6 +21,7 @@ const SOCKET_URL =
 const Chat = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const socket = useSocket();
 
   // =======================================================
   // CURRENT USER
@@ -353,7 +350,7 @@ const Chat = () => {
           );
 
           const response =
-            await authFetch(
+            await fetch(
               `${API_URL}/auth/me`,
               {
                 method: "GET",
@@ -476,7 +473,7 @@ const Chat = () => {
         setError("");
 
         const response =
-          await authFetch(
+          await fetch(
             `${API_URL}/connections`,
             {
               method: "GET",
@@ -659,7 +656,7 @@ const Chat = () => {
           setError("");
 
           const response =
-            await authFetch(
+            await fetch(
               `${API_URL}/messages/${selectedConnectionId}`,
               {
                 method: "GET",
@@ -703,7 +700,7 @@ const Chat = () => {
           }
 
           try {
-            await authFetch(
+            await fetch(
               `${API_URL}/messages/connection/${selectedConnectionId}/read-all`,
               {
                 method: "PATCH",
@@ -743,20 +740,9 @@ const Chat = () => {
   // =======================================================
 
   useEffect(() => {
-    if (!currentUserId) {
+    if (!currentUserId || !socket) {
       return;
     }
-
-    const socket = io(
-      SOCKET_URL,
-      {
-        withCredentials: true,
-        transports: [
-          "websocket",
-          "polling",
-        ],
-      }
-    );
 
     socketRef.current = socket;
 
@@ -1086,9 +1072,8 @@ const Chat = () => {
       handleConnectError
     );
 
-    // Socket is intentionally created only once per logged-in user.
-    // Presence for the currently selected receiver is refreshed whenever
-    // the receiver/connection changes by the second effect below.
+    // Use the single global SocketProvider connection. Chat only owns
+    // its event listeners; it must never create/disconnect a second socket.
 
     return () => {
       socket.off(
@@ -1134,11 +1119,11 @@ const Chat = () => {
         handleConnectError
       );
 
-      socket.disconnect();
-
-      socketRef.current = null;
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
     };
-  }, [currentUserId]);
+  }, [currentUserId, socket]);
 
   // =======================================================
   // REFRESH SELECTED USER PRESENCE
@@ -1313,7 +1298,7 @@ const Chat = () => {
 
     try {
       const response =
-        await authFetch(
+        await fetch(
           `${API_URL}/messages`,
           {
             method: "POST",
@@ -1484,7 +1469,7 @@ const Chat = () => {
           else { setMessage(""); setEditingMessageId(null); }
         });
       } else {
-        const response = await authFetch(`${API_URL}/messages/${editingMessageId}`, { method:"PATCH", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
+        const response = await fetch(`${API_URL}/messages/${editingMessageId}`, { method:"PATCH", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.message || "Unable to edit message");
         const edited = normalizeMessage(data?.data || data?.message);
@@ -1502,7 +1487,7 @@ const Chat = () => {
           if (!result?.success) alert(result?.message || "Unable to delete message");
         });
       } else {
-        const response = await authFetch(`${API_URL}/messages/${getId(msg._id)}`, { method:"DELETE", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mode}) });
+        const response = await fetch(`${API_URL}/messages/${getId(msg._id)}`, { method:"DELETE", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mode}) });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.message || "Unable to delete message");
         if (mode === "me") setMessages(previous => previous.filter(item => getId(item._id) !== getId(msg._id)));
@@ -1718,7 +1703,7 @@ const Chat = () => {
         );
 
         const response =
-          await authFetch(
+          await fetch(
             `${API_URL}/connections/${selectedConnectionId}`,
             {
               method: "DELETE",

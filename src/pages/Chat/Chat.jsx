@@ -893,6 +893,7 @@ const Chat = () => {
 
         if (shouldReadNow) {
           socket.emit("message-read", { messageId: normalized._id });
+        }
       }
     };
 

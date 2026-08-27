@@ -1,7 +1,7 @@
 
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../../services/api";
 
 const InterestCategory = () => {
   const navigate = useNavigate();
@@ -26,8 +26,8 @@ const InterestCategory = () => {
     try {
       setLoading(true);
 
-      const response = await axios.put(
-        "https://ghostinbox09.onrender.com/api/profile/category",
+      const response = await api.put(
+  "/profile/category",
         {
           category,
         },

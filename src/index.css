@@ -7093,3 +7093,77 @@ select {
 .chat-reply-bar strong { color:#d9d5e2; font-size:9px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:300px; }
 .chat-reply-bar button, .chat-edit-bar button { border:none; background:transparent; color:#898294; cursor:pointer; font-size:12px; }
 .chat-edit-bar { margin-bottom: 0; color:#b8a9d0; font-size:9px; }
+
+
+/* =========================================================
+   WHATSAPP-STYLE MESSAGE SELECTION
+========================================================= */
+.chat-selection-header {
+  gap: 12px;
+}
+.chat-selection-back,
+.chat-selection-delete,
+.chat-selection-more {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  color: #fff;
+  cursor: pointer;
+}
+.chat-selection-back { font-size: 22px; }
+.chat-selection-count { color:#fff; font-size:15px; font-weight:700; }
+.chat-selection-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+.chat-selection-delete { font-size:18px; }
+.chat-selection-more { font-size:24px; }
+.chat-selection-dropdown {
+  position: absolute;
+  z-index: 80;
+  top: 70px;
+  right: 8px;
+  min-width: 165px;
+  padding: 6px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;
+  background:rgba(10,11,20,.98);
+  box-shadow:0 16px 38px rgba(0,0,0,.48);
+  backdrop-filter:blur(14px);
+}
+.chat-selection-dropdown button {
+  border:0;
+  border-radius:8px;
+  padding:10px 11px;
+  background:transparent;
+  color:#e6e1ee;
+  text-align:left;
+  font:inherit;
+  font-size:11px;
+  cursor:pointer;
+}
+.chat-selection-dropdown button:hover { background:rgba(139,53,255,.14); color:#fff; }
+.message-row-selected { position:relative; }
+.message-row-selected::before {
+  content:"";
+  position:absolute;
+  inset:-5px -8px;
+  border-radius:18px;
+  background:rgba(139,53,255,.08);
+  pointer-events:none;
+}
+.message-bubble-selected {
+  outline:2px solid rgba(173,93,255,.72);
+  outline-offset:2px;
+}
+.message-bubble { user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+@media (max-width:600px) {
+  .chat-selection-dropdown { top:64px; right:4px; }
+  .chat-selection-header { height:72px; }
+}

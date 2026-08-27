@@ -125,6 +125,13 @@ const Chat = () => {
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [actionMessageId, setActionMessageId] = useState(null);
 
+  // WhatsApp-style message selection mode.
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+  const [selectionMenu, setSelectionMenu] = useState(null);
+
+  const longPressTimerRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
+
   // =======================================================
   // ERROR
   // =======================================================
@@ -524,6 +531,30 @@ const Chat = () => {
   }, [currentUserId]);
 
   // =======================================================
+  // OPEN CHAT FROM NOTIFICATION
+  // =======================================================
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connectionIdFromUrl = params.get("connectionId");
+    if (!connectionIdFromUrl || !connections.length || !currentUserId) return;
+
+    const connection = connections.find((item) => getId(item) === connectionIdFromUrl || getId(item?._id) === connectionIdFromUrl);
+    if (!connection) return;
+
+    const otherUser = getOtherUser(connection);
+    const receiverId = getId(otherUser);
+    if (!receiverId) return;
+
+    setSelectedConnection(connection);
+    setSelectedConnectionId(connectionIdFromUrl);
+    setSelectedUser(otherUser);
+    setSelectedReceiverId(receiverId);
+    setOtherUserLastSeen(otherUser?.lastSeen || null);
+    setIsOtherUserOnline(Boolean(otherUser?.isOnline));
+    navigate("/chat", { replace: true, state: { connection, connectionId: connectionIdFromUrl, user: otherUser, receiverId } });
+  }, [connections, currentUserId, location.search]);
+
+  // =======================================================
   // OPEN CHAT
   // =======================================================
 
@@ -862,11 +893,6 @@ const Chat = () => {
 
         if (shouldReadNow) {
           socket.emit("message-read", { messageId: normalized._id });
-        } else if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("New message", {
-            body: normalized.text || "You received a new message",
-          });
-        }
       }
     };
 
@@ -1356,27 +1382,94 @@ const Chat = () => {
   };
 
   // =======================================================
-  // MESSAGE ACTIONS
+  // WHATSAPP-STYLE MESSAGE SELECTION / ACTIONS
   // =======================================================
+  const clearMessageSelection = () => {
+    setSelectedMessageIds([]);
+    setSelectionMenu(null);
+    setActionMessageId(null);
+  };
+
+  const getSelectedMessages = () => {
+    const ids = new Set(selectedMessageIds.map(String));
+    return messages.filter((item) => ids.has(String(getId(item._id))));
+  };
+
+  const toggleMessageSelection = (msg) => {
+    if (!msg || msg.deletedForEveryone) return;
+    const id = getId(msg._id);
+    if (!id) return;
+
+    setSelectedMessageIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id]
+    );
+    setSelectionMenu(null);
+    setActionMessageId(null);
+  };
+
+  const startMessageLongPress = (msg, event) => {
+    if (!msg || msg.deletedForEveryone) return;
+    if (event?.pointerType === "mouse" && event.button !== 0) return;
+
+    longPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      toggleMessageSelection(msg);
+    }, 550);
+  };
+
+  const cancelMessageLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleMessageClick = (msg) => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+
+    // Outside selection mode a normal tap does NOTHING.
+    // While selecting, a normal tap toggles the message.
+    if (selectedMessageIds.length > 0) {
+      toggleMessageSelection(msg);
+    }
+  };
+
   const startEditMessage = (msg) => {
     if (!msg || msg.deletedForEveryone || msg.isSavedAsEvidence) return;
     setEditingMessageId(getId(msg._id));
     setReplyingTo(null);
     setMessage(msg.text || "");
-    setActionMessageId(null);
+    clearMessageSelection();
   };
 
   const startReply = (msg) => {
     if (!msg) return;
     setReplyingTo(msg);
     setEditingMessageId(null);
-    setActionMessageId(null);
+    clearMessageSelection();
   };
 
   const copyMessage = async (msg) => {
     if (!msg?.text || msg.deletedForEveryone) return;
     try { await navigator.clipboard.writeText(msg.text); } catch { /* ignore clipboard failures */ }
-    setActionMessageId(null);
+    clearMessageSelection();
+  };
+
+  const copySelectedMessages = async () => {
+    const selected = getSelectedMessages().filter((item) => !item.deletedForEveryone && item.text);
+    if (!selected.length) return;
+    try {
+      await navigator.clipboard.writeText(selected.map((item) => item.text).join("\n"));
+    } catch { /* ignore clipboard failures */ }
+    clearMessageSelection();
   };
 
   const finishEdit = async () => {
@@ -1401,7 +1494,6 @@ const Chat = () => {
 
   const deleteMessage = async (msg, mode = "me") => {
     if (!msg || msg.isSavedAsEvidence) return;
-    setActionMessageId(null);
     try {
       if (socketRef.current?.connected) {
         socketRef.current.emit("delete-message", { messageId:getId(msg._id), mode }, (result) => {
@@ -1417,14 +1509,48 @@ const Chat = () => {
     } catch (error) { alert(error.message || "Unable to delete message"); }
   };
 
-  const requestNotificationPermission = async () => {
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "default") {
-      try { await Notification.requestPermission(); } catch { /* ignore */ }
+  const deleteSelectedMessages = async (mode = "me") => {
+    const selected = getSelectedMessages().filter((item) => !item.isSavedAsEvidence);
+    if (!selected.length) return;
+
+    // "Delete for everyone" is legal only when EVERY selected message belongs to me.
+    const allMine = selected.every((item) => getId(item.sender) === getId(currentUserId));
+    const safeMode = mode === "everyone" && allMine ? "everyone" : "me";
+
+    setSelectionMenu(null);
+    for (const msg of selected) {
+      // Mixed selection can only use Delete for me.
+      const itemMode = safeMode === "everyone" ? "everyone" : "me";
+      await deleteMessage(msg, itemMode);
     }
+    clearMessageSelection();
   };
 
-  useEffect(() => { requestNotificationPermission(); }, []);
+  const selectedMessages = getSelectedMessages();
+  const selectedAllMine = selectedMessages.length > 0 && selectedMessages.every((item) => getId(item.sender) === getId(currentUserId));
+  const selectedSingle = selectedMessages.length === 1 ? selectedMessages[0] : null;
+
+  // =======================================================
+  // ACTIVE CHAT FOR GLOBAL NOTIFICATIONS
+  // =======================================================
+  // The global SocketProvider handles browser notifications. This value lets
+  // it know which conversation is currently open in this tab.
+  useEffect(() => {
+    const key = "ghostinbox-active-chat";
+    const connectionId = getId(selectedConnectionId);
+
+    if (connectionId && document.visibilityState === "visible") {
+      localStorage.setItem(key, connectionId);
+    }
+
+    const clearActiveChat = () => {
+      if (localStorage.getItem(key) === connectionId) {
+        localStorage.removeItem(key);
+      }
+    };
+
+    return clearActiveChat;
+  }, [selectedConnectionId]);
 
   // =======================================================
   // ENTER TO SEND
@@ -1716,6 +1842,8 @@ const Chat = () => {
       setIsOtherUserTyping(
         false
       );
+
+      clearMessageSelection();
 
       setOtherUserLastSeen(
         null
@@ -2050,6 +2178,16 @@ const Chat = () => {
             HEADER
         ================================================= */}
 
+        {selectedMessageIds.length > 0 ? (
+          <header className="chat-header chat-selection-header">
+            <button type="button" className="chat-selection-back" onClick={clearMessageSelection} aria-label="Cancel selection">←</button>
+            <strong className="chat-selection-count">{selectedMessageIds.length}</strong>
+            <div className="chat-selection-actions">
+              <button type="button" className="chat-selection-delete" onClick={() => setSelectionMenu(selectionMenu === "delete" ? null : "delete")} aria-label="Delete selected messages">🗑</button>
+              <button type="button" className="chat-selection-more" onClick={() => setSelectionMenu(selectionMenu === "more" ? null : "more")} aria-label="More options">⋮</button>
+            </div>
+          </header>
+        ) : (
         <header className="chat-header">
 
           <button
@@ -2141,6 +2279,27 @@ const Chat = () => {
           </button>
 
         </header>
+        )}
+
+        {selectedMessageIds.length > 0 && selectionMenu && (
+          <div className="chat-selection-dropdown">
+            {selectionMenu === "more" && (
+              <>
+                {selectedSingle && <button type="button" onClick={() => startReply(selectedSingle)}>Reply</button>}
+                <button type="button" onClick={selectedMessageIds.length > 1 ? copySelectedMessages : () => copyMessage(selectedSingle)}>Copy</button>
+                {selectedSingle && selectedAllMine && !selectedSingle.isSavedAsEvidence && <button type="button" onClick={() => startEditMessage(selectedSingle)}>Edit</button>}
+              </>
+            )}
+            {selectionMenu === "delete" && (
+              <>
+                <button type="button" onClick={() => deleteSelectedMessages("me")}>Delete for me</button>
+                {selectedAllMine && selectedMessages.every((item) => !item.isSavedAsEvidence) && (
+                  <button type="button" onClick={() => deleteSelectedMessages("everyone")}>Delete for everyone</button>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* =================================================
             MENU
@@ -2247,22 +2406,24 @@ const Chat = () => {
               const isMe = getId(msg.sender) === getId(currentUserId);
               const hiddenForMe = (msg.deletedFor || []).includes(getId(currentUserId));
               if (hiddenForMe) return null;
+              const id = getId(msg._id);
+              const isSelected = selectedMessageIds.includes(id);
               const time = new Date(msg.createdAt).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
               const isDelivered = Boolean(msg.deliveredAt || msg.isRead);
               const isDeleted = Boolean(msg.deletedForEveryone);
               return (
-                <div key={msg._id} className={`message-row ${isMe ? "message-row-me" : "message-row-other"}`}>
+                <div key={msg._id} className={`message-row ${isMe ? "message-row-me" : "message-row-other"} ${isSelected ? "message-row-selected" : ""}`}>
                   <div className="message-bubble-wrap">
-                    {actionMessageId === getId(msg._id) && !isDeleted && (
-                      <div className={`message-action-menu ${isMe ? "message-action-menu-me" : ""}`}>
-                        <button type="button" onClick={() => startReply(msg)}>Reply</button>
-                        <button type="button" onClick={() => copyMessage(msg)}>Copy</button>
-                        {isMe && !msg.isSavedAsEvidence && <button type="button" onClick={() => startEditMessage(msg)}>Edit</button>}
-                        {!msg.isSavedAsEvidence && <button type="button" onClick={() => deleteMessage(msg, "me")}>Delete for me</button>}
-                        {isMe && !msg.isSavedAsEvidence && <button type="button" onClick={() => deleteMessage(msg, "everyone")}>Delete for everyone</button>}
-                      </div>
-                    )}
-                    <button type="button" className={`message-bubble ${isMe ? "message-bubble-me" : "message-bubble-other"} ${isDeleted ? "message-bubble-deleted" : ""}`} onClick={() => setActionMessageId(actionMessageId === getId(msg._id) ? null : getId(msg._id))}>
+                    <button
+                      type="button"
+                      className={`message-bubble ${isMe ? "message-bubble-me" : "message-bubble-other"} ${isDeleted ? "message-bubble-deleted" : ""} ${isSelected ? "message-bubble-selected" : ""}`}
+                      onPointerDown={(event) => startMessageLongPress(msg, event)}
+                      onPointerUp={cancelMessageLongPress}
+                      onPointerLeave={cancelMessageLongPress}
+                      onPointerCancel={cancelMessageLongPress}
+                      onContextMenu={(event) => event.preventDefault()}
+                      onClick={() => handleMessageClick(msg)}
+                    >
                       {msg.replyPreview && (
                         <div className="message-reply-preview">
                           <span>Replying to</span>

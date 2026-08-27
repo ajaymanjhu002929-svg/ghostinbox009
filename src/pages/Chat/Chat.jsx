@@ -121,6 +121,10 @@ const Chat = () => {
   const [sending, setSending] =
     useState(false);
 
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [actionMessageId, setActionMessageId] = useState(null);
+
   // =======================================================
   // ERROR
   // =======================================================
@@ -295,6 +299,14 @@ const Chat = () => {
         Boolean(
           messageData.isRead
         ),
+
+      deliveredAt: messageData.deliveredAt || null,
+      edited: Boolean(messageData.edited),
+      editedAt: messageData.editedAt || null,
+      deletedForEveryone: Boolean(messageData.deletedForEveryone),
+      deletedFor: Array.isArray(messageData.deletedFor) ? messageData.deletedFor.map(getId) : [],
+      replyTo: getId(messageData.replyTo),
+      replyPreview: messageData.replyPreview || null,
 
       isFlagged:
         Boolean(
@@ -654,6 +666,10 @@ const Chat = () => {
           // MARK RECEIVED MESSAGES AS READ
           // ================================================
 
+          if (socketRef.current?.connected) {
+            socketRef.current.emit("mark-connection-read", { connectionId: selectedConnectionId });
+          }
+
           try {
             await fetch(
               `${API_URL}/messages/connection/${selectedConnectionId}/read-all`,
@@ -837,12 +853,20 @@ const Chat = () => {
         getId(currentUserId) &&
         normalized._id
       ) {
-        socket.emit(
-          "message-read",
-          {
-            messageId: normalized._id,
-          }
-        );
+        socket.emit("message-delivered", { messageId: normalized._id });
+
+        const isSelectedChat =
+          getId(normalized.connection) === getId(selectedConnectionIdRef.current);
+        const shouldReadNow =
+          isSelectedChat && document.visibilityState === "visible";
+
+        if (shouldReadNow) {
+          socket.emit("message-read", { messageId: normalized._id });
+        } else if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("New message", {
+            body: normalized.text || "You received a new message",
+          });
+        }
       }
     };
 
@@ -885,6 +909,7 @@ const Chat = () => {
 
       setSending(false);
       setMessage("");
+      setReplyingTo(null);
       setIsOtherUserTyping(false);
       scrollToBottom();
     };
@@ -916,6 +941,29 @@ const Chat = () => {
           };
         })
       );
+    };
+
+    // =====================================================
+    // DELIVERY / EDIT / DELETE
+    // =====================================================
+
+    const handleMessageDelivered = (data) => {
+      setMessages(previous => previous.map(item => getId(item._id) === getId(data?.messageId) ? { ...item, deliveredAt: data.deliveredAt || new Date().toISOString() } : item));
+    };
+
+    const handleMessageEdited = (data) => {
+      const normalized = normalizeMessage(data);
+      if (!normalized) return;
+      setMessages(previous => previous.map(item => getId(item._id) === getId(normalized._id) ? { ...item, ...normalized } : item));
+    };
+
+    const handleMessageDeleted = (data) => {
+      const id = getId(data?.messageId);
+      setMessages(previous => previous.map(item => {
+        if (getId(item._id) !== id) return item;
+        if (data?.mode === "me" && getId(data?.userId) === getId(currentUserId)) return { ...item, deletedFor: [...(item.deletedFor || []), getId(currentUserId)] };
+        return { ...item, ...(data?.message ? normalizeMessage(data.message) : {}), deletedForEveryone: data?.mode === "everyone" ? true : item.deletedForEveryone, text: data?.mode === "everyone" ? "This message was deleted" : item.text };
+      }).filter(item => !(item.deletedFor || []).includes(getId(currentUserId))));
     };
 
     // =====================================================
@@ -960,6 +1008,10 @@ const Chat = () => {
       );
 
       requestCurrentPresence();
+      const connectionId = getId(selectedConnectionIdRef.current);
+      if (connectionId) {
+        socket.emit("mark-connection-read", { connectionId });
+      }
     };
 
     socket.on(
@@ -991,6 +1043,10 @@ const Chat = () => {
       "message-read",
       handleMessageRead
     );
+
+    socket.on("message-delivered", handleMessageDelivered);
+    socket.on("message-edited", handleMessageEdited);
+    socket.on("message-deleted", handleMessageDeleted);
 
     socket.on(
       "safety-prompt",
@@ -1036,6 +1092,9 @@ const Chat = () => {
         "message-read",
         handleMessageRead
       );
+      socket.off("message-delivered", handleMessageDelivered);
+      socket.off("message-edited", handleMessageEdited);
+      socket.off("message-deleted", handleMessageDeleted);
 
       socket.off(
         "safety-prompt",
@@ -1157,10 +1216,10 @@ const Chat = () => {
     const text =
       message.trim();
 
-    if (
-      !text ||
-      sending
-    ) {
+    if (!text || sending) { return; }
+
+    if (editingMessageId) {
+      await finishEdit();
       return;
     }
 
@@ -1200,6 +1259,7 @@ const Chat = () => {
             selectedReceiverId,
 
           text,
+          replyTo: replyingTo?._id || null,
         },
 
         (result) => {
@@ -1246,6 +1306,7 @@ const Chat = () => {
                   selectedReceiverId,
 
                 text,
+                replyTo: replyingTo?._id || null,
               }),
           }
         );
@@ -1276,6 +1337,7 @@ const Chat = () => {
       }
 
       setMessage("");
+      setReplyingTo(null);
 
       scrollToBottom();
     } catch (error) {
@@ -1292,6 +1354,77 @@ const Chat = () => {
       setSending(false);
     }
   };
+
+  // =======================================================
+  // MESSAGE ACTIONS
+  // =======================================================
+  const startEditMessage = (msg) => {
+    if (!msg || msg.deletedForEveryone || msg.isSavedAsEvidence) return;
+    setEditingMessageId(getId(msg._id));
+    setReplyingTo(null);
+    setMessage(msg.text || "");
+    setActionMessageId(null);
+  };
+
+  const startReply = (msg) => {
+    if (!msg) return;
+    setReplyingTo(msg);
+    setEditingMessageId(null);
+    setActionMessageId(null);
+  };
+
+  const copyMessage = async (msg) => {
+    if (!msg?.text || msg.deletedForEveryone) return;
+    try { await navigator.clipboard.writeText(msg.text); } catch { /* ignore clipboard failures */ }
+    setActionMessageId(null);
+  };
+
+  const finishEdit = async () => {
+    const text = message.trim();
+    if (!editingMessageId || !text) return;
+    try {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("edit-message", { messageId: editingMessageId, text }, (result) => {
+          if (!result?.success) alert(result?.message || "Unable to edit message");
+          else { setMessage(""); setEditingMessageId(null); }
+        });
+      } else {
+        const response = await fetch(`${API_URL}/messages/${editingMessageId}`, { method:"PATCH", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text}) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.message || "Unable to edit message");
+        const edited = normalizeMessage(data?.data || data?.message);
+        setMessages(previous => previous.map(item => getId(item._id) === editingMessageId ? { ...item, ...edited } : item));
+        setMessage(""); setEditingMessageId(null);
+      }
+    } catch (error) { alert(error.message || "Unable to edit message"); }
+  };
+
+  const deleteMessage = async (msg, mode = "me") => {
+    if (!msg || msg.isSavedAsEvidence) return;
+    setActionMessageId(null);
+    try {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("delete-message", { messageId:getId(msg._id), mode }, (result) => {
+          if (!result?.success) alert(result?.message || "Unable to delete message");
+        });
+      } else {
+        const response = await fetch(`${API_URL}/messages/${getId(msg._id)}`, { method:"DELETE", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mode}) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.message || "Unable to delete message");
+        if (mode === "me") setMessages(previous => previous.filter(item => getId(item._id) !== getId(msg._id)));
+        else setMessages(previous => previous.map(item => getId(item._id) === getId(msg._id) ? { ...item, deletedForEveryone:true, text:"This message was deleted", edited:false } : item));
+      }
+    } catch (error) { alert(error.message || "Unable to delete message"); }
+  };
+
+  const requestNotificationPermission = async () => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch { /* ignore */ }
+    }
+  };
+
+  useEffect(() => { requestNotificationPermission(); }, []);
 
   // =======================================================
   // ENTER TO SEND
@@ -2110,81 +2243,45 @@ const Chat = () => {
 
           ) : (
 
-            messages.map(
-              (msg) => {
-                const isMe =
-                  getId(
-                    msg.sender
-                  ) ===
-                  getId(
-                    currentUserId
-                  );
-
-                return (
-                  <div
-                    key={
-                      msg._id
-                    }
-                    className={
-                      `message-row ${
-                        isMe
-                          ? "message-row-me"
-                          : "message-row-other"
-                      }`
-                    }
-                  >
-
-                    <div
-                      className={
-                        `message-bubble ${
-                          isMe
-                            ? "message-bubble-me"
-                            : "message-bubble-other"
-                        }`
-                      }
-                    >
-
-                      <div>
-                        {msg.text}
+            messages.map((msg) => {
+              const isMe = getId(msg.sender) === getId(currentUserId);
+              const hiddenForMe = (msg.deletedFor || []).includes(getId(currentUserId));
+              if (hiddenForMe) return null;
+              const time = new Date(msg.createdAt).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+              const isDelivered = Boolean(msg.deliveredAt || msg.isRead);
+              const isDeleted = Boolean(msg.deletedForEveryone);
+              return (
+                <div key={msg._id} className={`message-row ${isMe ? "message-row-me" : "message-row-other"}`}>
+                  <div className="message-bubble-wrap">
+                    {actionMessageId === getId(msg._id) && !isDeleted && (
+                      <div className={`message-action-menu ${isMe ? "message-action-menu-me" : ""}`}>
+                        <button type="button" onClick={() => startReply(msg)}>Reply</button>
+                        <button type="button" onClick={() => copyMessage(msg)}>Copy</button>
+                        {isMe && !msg.isSavedAsEvidence && <button type="button" onClick={() => startEditMessage(msg)}>Edit</button>}
+                        {!msg.isSavedAsEvidence && <button type="button" onClick={() => deleteMessage(msg, "me")}>Delete for me</button>}
+                        {isMe && !msg.isSavedAsEvidence && <button type="button" onClick={() => deleteMessage(msg, "everyone")}>Delete for everyone</button>}
                       </div>
-
+                    )}
+                    <button type="button" className={`message-bubble ${isMe ? "message-bubble-me" : "message-bubble-other"} ${isDeleted ? "message-bubble-deleted" : ""}`} onClick={() => setActionMessageId(actionMessageId === getId(msg._id) ? null : getId(msg._id))}>
+                      {msg.replyPreview && (
+                        <div className="message-reply-preview">
+                          <span>Replying to</span>
+                          <strong>{msg.replyPreview}</strong>
+                        </div>
+                      )}
+                      <div className="message-text">{msg.text}</div>
                       <small>
-
-                        {new Date(
-                          msg.createdAt
-                        ).toLocaleTimeString(
-                          [],
-                          {
-                            hour:
-                              "2-digit",
-
-                            minute:
-                              "2-digit",
-                          }
-                        )}
-
-                        {isMe &&
-                          msg.isRead && (
-                            <span>
-                              {" "}✓✓
-                            </span>
-                          )}
-
-                        {msg.isSavedAsEvidence && (
-                          <span>
-                            {" "}🔒
-                          </span>
-                        )}
-
+                        {time}
+                        {msg.edited && !isDeleted && <span> · edited</span>}
+                        {isMe && !isDeleted && <span className={`message-checks ${msg.isRead ? "seen" : isDelivered ? "delivered" : "sent"}`}>{msg.isRead ? " ✓✓" : isDelivered ? " ✓✓" : " ✓"}</span>}
+                        {msg.isSavedAsEvidence && <span> 🔒</span>}
                       </small>
-
-                    </div>
-
+                    </button>
+                    {isMe && msg.isRead && !isDeleted && <div className="message-seen-label">Seen</div>}
                   </div>
-                );
-              }
-            )
-
+                </div>
+              );
+            })
           )}
 
           <div
@@ -2214,6 +2311,20 @@ const Chat = () => {
         {/* =================================================
             INPUT
         ================================================= */}
+
+        {replyingTo && (
+          <div className="chat-reply-bar">
+            <div><span>Replying to</span><strong>{replyingTo.text}</strong></div>
+            <button type="button" onClick={() => setReplyingTo(null)}>×</button>
+          </div>
+        )}
+
+        {editingMessageId && (
+          <div className="chat-edit-bar">
+            <span>Editing message</span>
+            <button type="button" onClick={() => { setEditingMessageId(null); setMessage(""); }}>Cancel</button>
+          </div>
+        )}
 
         <div className="chat-input-area">
 

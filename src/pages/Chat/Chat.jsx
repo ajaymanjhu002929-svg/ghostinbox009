@@ -529,6 +529,88 @@ const Chat = () => {
   }, [currentUserId]);
 
   // =======================================================
+  // RECONCILE SELECTED CHAT WITH FRESH CONNECTION DATA
+  // =======================================================
+  // If this browser still has an old connectionId after a
+  // connection was removed and accepted again, /connections
+  // contains the current active connection. Resolve it by the
+  // selected receiver and replace the stale ID.
+
+  useEffect(() => {
+    if (
+      !currentUserId ||
+      !selectedReceiverId ||
+      !Array.isArray(connections) ||
+      connections.length === 0
+    ) {
+      return;
+    }
+
+    const receiverId = getId(
+      selectedReceiverId
+    );
+
+    if (!receiverId) {
+      return;
+    }
+
+    const freshConnection =
+      connections.find((item) => {
+
+        const user1 =
+          getUserObject(item?.user1);
+
+        const user2 =
+          getUserObject(item?.user2);
+
+        const user1Id =
+          getId(user1);
+
+        const user2Id =
+          getId(user2);
+
+        return (
+          (
+            user1Id === currentUserId &&
+            user2Id === receiverId
+          ) ||
+          (
+            user2Id === currentUserId &&
+            user1Id === receiverId
+          )
+        );
+      });
+
+    if (!freshConnection) {
+      return;
+    }
+
+    const freshConnectionId =
+      getId(freshConnection);
+
+    if (!freshConnectionId) {
+      return;
+    }
+
+    if (
+      getId(selectedConnectionId) !==
+      freshConnectionId
+    ) {
+      setSelectedConnection(
+        freshConnection
+      );
+
+      setSelectedConnectionId(
+        freshConnectionId
+      );
+    }
+  }, [
+    connections,
+    currentUserId,
+    selectedReceiverId,
+  ]);
+
+  // =======================================================
   // OPEN CHAT FROM NOTIFICATION
   // =======================================================
   useEffect(() => {

@@ -1304,147 +1304,178 @@ const Chat = () => {
   }, [selectedReceiverId, selectedConnectionId]);
 
   // =======================================================
+  // RESOLVE CURRENT ACTIVE CONNECTION
+  // =======================================================
+  // A connection can be removed and later accepted again.
+  // In that case Chat may still have stale route/state data.
+  // Always resolve the current active connection by both users
+  // before sending a message.
+
+  const resolveActiveConnection = async () => {
+    const receiverId = getId(selectedReceiverIdRef.current);
+
+    if (!currentUserId || !receiverId) {
+      return null;
+    }
+
+    const response = await fetch(`${API_URL}/connections`, {
+      method: "GET",
+      credentials: "include",
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data?.message || "Failed to load active connection");
+    }
+
+    const list = Array.isArray(data?.connections)
+      ? data.connections
+      : Array.isArray(data?.data)
+        ? data.data
+        : [];
+
+    const fresh = list.find((item) => {
+      const user1Id = getId(item?.user1);
+      const user2Id = getId(item?.user2);
+
+      return (
+        (user1Id === getId(currentUserId) && user2Id === receiverId) ||
+        (user2Id === getId(currentUserId) && user1Id === receiverId)
+      );
+    });
+
+    if (!fresh) {
+      return null;
+    }
+
+    const freshId = getId(fresh);
+    if (!freshId) {
+      return null;
+    }
+
+    setSelectedConnection(fresh);
+    setSelectedConnectionId(freshId);
+    selectedConnectionIdRef.current = freshId;
+
+    const otherUser = getOtherUser(fresh);
+    if (otherUser) {
+      setSelectedUser(otherUser);
+      setSelectedReceiverId(getId(otherUser));
+      selectedReceiverIdRef.current = getId(otherUser);
+    }
+
+    return {
+      connectionId: freshId,
+      receiverId: receiverId,
+      connection: fresh,
+    };
+  };
+
+  // =======================================================
   // SEND MESSAGE
   // =======================================================
 
   const handleSend = async () => {
-    const text =
-      message.trim();
+    const text = message.trim();
 
-    if (!text || sending) { return; }
+    if (!text || sending) return;
 
     if (editingMessageId) {
       await finishEdit();
       return;
     }
 
-    if (
-      !selectedConnectionId ||
-      !selectedReceiverId
-    ) {
-      alert(
-        "Chat connection not found."
-      );
-
+    if (!selectedReceiverId) {
+      alert("Chat connection not found.");
       return;
     }
 
     setSending(true);
-
-    // -----------------------------------------------
-    // STOP TYPING
-    // -----------------------------------------------
-
     stopTyping();
 
-    // =====================================================
-    // SOCKET SEND
-    // =====================================================
-
-    if (
-      socketRef.current?.connected
-    ) {
-      socketRef.current.emit(
-        "send-message",
-        {
-          connectionId:
-            selectedConnectionId,
-
-          receiver:
-            selectedReceiverId,
-
-          text,
-          replyTo: replyingTo?._id || null,
-        },
-
-        (result) => {
-          if (
-            !result?.success
-          ) {
-            setSending(false);
-
-            alert(
-              result?.message ||
-                "Failed to send message"
-            );
-          }
-        }
-      );
-
-      return;
-    }
-
-    // =====================================================
-    // HTTP FALLBACK
-    // =====================================================
-
     try {
-      const response =
-        await fetch(
-          `${API_URL}/messages`,
-          {
-            method: "POST",
+      // IMPORTANT: do not trust an old connectionId after a
+      // remove -> request -> accept cycle. Resolve the active
+      // connection from the backend first.
+      const active = await resolveActiveConnection();
 
-            credentials: "include",
-
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-
-            body:
-              JSON.stringify({
-                connectionId:
-                  selectedConnectionId,
-
-                receiverId:
-                  selectedReceiverId,
-
-                text,
-                replyTo: replyingTo?._id || null,
-              }),
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            "Failed to send message"
-        );
+      if (!active?.connectionId || !active?.receiverId) {
+        throw new Error("Active connection not found. Please open the chat again.");
       }
 
-      const newMessage =
-        normalizeMessage(
-          data?.message ||
-            data?.data
-        );
+      const payload = {
+        connectionId: active.connectionId,
+        receiver: active.receiverId,
+        receiverId: active.receiverId,
+        text,
+        replyTo: replyingTo?._id || null,
+      };
+
+      if (socketRef.current?.connected) {
+        await new Promise((resolve, reject) => {
+          let settled = false;
+
+          const finish = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            fn(value);
+          };
+
+          socketRef.current.emit("send-message", payload, (result) => {
+            if (result?.success) {
+              finish(resolve, result);
+            } else {
+              finish(reject, new Error(result?.message || "Failed to send message"));
+            }
+          });
+
+          setTimeout(() => {
+            finish(reject, new Error("Message send timed out"));
+          }, 10000);
+        });
+
+        // message-sent listener clears the composer and adds the message.
+        return;
+      }
+
+      // HTTP fallback
+      const response = await fetch(`${API_URL}/messages`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionId: active.connectionId,
+          receiverId: active.receiverId,
+          text,
+          replyTo: replyingTo?._id || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.message || "Failed to send message");
+      }
+
+      const newMessage = normalizeMessage(data?.message || data?.data);
 
       if (newMessage) {
-        setMessages(
-          (previous) => [
-            ...previous,
-            newMessage,
-          ]
-        );
+        setMessages((previous) => {
+          const exists = previous.some(
+            (item) => getId(item._id) === getId(newMessage._id)
+          );
+          return exists ? previous : [...previous, newMessage];
+        });
       }
 
       setMessage("");
       setReplyingTo(null);
-
+      setIsOtherUserTyping(false);
       scrollToBottom();
     } catch (error) {
-      console.error(
-        "Send error:",
-        error
-      );
-
-      alert(
-        error.message ||
-          "Unable to send message"
-      );
+      console.error("Send error:", error);
+      alert(error.message || "Unable to send message");
     } finally {
       setSending(false);
     }

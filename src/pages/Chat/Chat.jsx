@@ -129,6 +129,8 @@ const Chat = () => {
 
   const longPressTimerRef = useRef(null);
   const longPressTriggeredRef = useRef(false);
+  const pointerStartRef = useRef({ x: 0, y: 0 });
+  const swipeReplyTriggeredRef = useRef(false);
 
   // =======================================================
   // ERROR
@@ -1530,13 +1532,47 @@ const Chat = () => {
     if (!msg || msg.deletedForEveryone) return;
     if (event?.pointerType === "mouse" && event.button !== 0) return;
 
+    pointerStartRef.current = {
+      x: event?.clientX || 0,
+      y: event?.clientY || 0,
+    };
+
     longPressTriggeredRef.current = false;
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    swipeReplyTriggeredRef.current = false;
+
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
 
     longPressTimerRef.current = setTimeout(() => {
       longPressTriggeredRef.current = true;
       toggleMessageSelection(msg);
     }, 550);
+  };
+
+  const handleMessagePointerMove = (msg, event) => {
+    if (!msg || msg.deletedForEveryone) return;
+
+    const start = pointerStartRef.current;
+    const deltaX = (event?.clientX || 0) - start.x;
+    const deltaY = (event?.clientY || 0) - start.y;
+
+    // Horizontal right-swipe = Reply. Keep normal vertical scrolling intact.
+    if (
+      deltaX > 55 &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 1.2
+    ) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+
+      if (!swipeReplyTriggeredRef.current) {
+        swipeReplyTriggeredRef.current = true;
+        longPressTriggeredRef.current = true;
+        startReply(msg);
+      }
+    }
   };
 
   const cancelMessageLongPress = () => {
@@ -2535,6 +2571,7 @@ const Chat = () => {
                       type="button"
                       className={`message-bubble ${isMe ? "message-bubble-me" : "message-bubble-other"} ${isDeleted ? "message-bubble-deleted" : ""} ${isSelected ? "message-bubble-selected" : ""}`}
                       onPointerDown={(event) => startMessageLongPress(msg, event)}
+                      onPointerMove={(event) => handleMessagePointerMove(msg, event)}
                       onPointerUp={cancelMessageLongPress}
                       onPointerLeave={cancelMessageLongPress}
                       onPointerCancel={cancelMessageLongPress}
